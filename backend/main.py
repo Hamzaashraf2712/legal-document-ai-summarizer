@@ -169,29 +169,22 @@ def convert_pdf():
 
 
 def convert_pdf_to_image(pdf_path, output_dir, output_file="output_image.png"):
-    """Convert the first page of a PDF to an image using PyMuPDF."""
+    """Convert a PDF to an image using PyMuPDF."""
     try:
-        # Open the PDF
         doc = fitz.open(pdf_path)
-        
-        # Ensure the output directory exists
         if not os.path.exists(output_dir):
             os.makedirs(output_dir)
 
-        # Process only the first page (page_num = 0)
-        page_num = 0
-        page = doc.load_page(page_num)  # Load the first page
-        pix = page.get_pixmap(dpi=150)  # Render page to an image (dpi=150 for quality)
-        
-        # Define the image path for the first page
-        image_path = os.path.join(output_dir, f"{os.path.splitext(output_file)[0]}_page1.png")
-        pix.save(image_path)  # Save the image
+        image_paths = []
+        for page_num in range(len(doc)):  # Iterate over all pages
+            page = doc.load_page(page_num)  # Load a single page
+            pix = page.get_pixmap(dpi=150)  # Render page to an image (dpi=150 for quality)
+            image_path = os.path.join(output_dir, f"{os.path.splitext(output_file)[0]}_{page_num + 1}.png")
+            pix.save(image_path)
+            image_paths.append(image_path)
 
-        # Close the document
-        doc.close()
+        return image_paths
 
-        # Return the single image path as a string (not a list)
-        return image_path
     except Exception as e:
         print(f"Error during PDF to image conversion: {e}")
         return None

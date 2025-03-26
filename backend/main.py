@@ -1,20 +1,23 @@
-from flask import Flask, request, jsonify
-from flask_cors import CORS 
+from flask import Flask, request, jsonify,send_file
+from flask_cors import CORS, cross_origin
 import os
 from werkzeug.utils import secure_filename
 from openai import OpenAI
 from azure.ai.formrecognizer import DocumentAnalysisClient
 from azure.core.credentials import AzureKeyCredential
 from dotenv import load_dotenv
-
+from pdf2image import convert_from_path
+import os
+import fitz  # PyMuPDF
 
 load_dotenv()
 
 app = Flask(__name__)
-CORS(app)
+CORS(app, support_credentials=True)
+
+
 app.config['UPLOAD_FOLDER'] = 'uploads/'
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
-
 AZURE_ENDPOINT = os.getenv('AZURE_ENDPOINT')
 AZURE_KEY = os.getenv('AZURE_KEY')
 OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
@@ -56,6 +59,8 @@ def chunk_text(text, max_chunk_size=3000):
 
 
 @app.route('/analyze-and-summarize-file', methods=['POST'])
+@cross_origin(supports_credentials=True)
+
 def analyze_and_summarize_file():
     try:
         # Check if file was uploaded
@@ -131,5 +136,106 @@ def analyze_and_summarize_file():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+@app.route('/convert', methods=['POST'])
+def convert_pdf():
+    if 'file' not in request.files:
+        return jsonify({"error": "No file provided."}), 400
+
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({"error": "No selected file."}), 400
+
+    try:
+        pdf_path = os.path.join("temp", file.filename)
+        output_dir = "output_images"
+        file.save(pdf_path)
+
+        image_paths = convert_pdf_to_image(pdf_path, output_dir)
+
+        if not image_paths:
+            return jsonify({"error": "Conversion failed."}), 500
+
+        # For simplicity, returning the first image file
+        return send_file(image_paths[0], mimetype='image/png')
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+    finally:
+        # Clean up the uploaded file if necessary
+        if os.path.exists(pdf_path):
+            os.remove(pdf_path)
+
+
+
+def convert_pdf_to_image(pdf_path, output_dir, output_file="output_image.png"):
+    """Convert the first page of a PDF to an image using PyMuPDF."""
+    try:
+        # Open the PDF
+        doc = fitz.open(pdf_path)
+        
+        # Ensure the output directory exists
+        if not os.path.exists(output_dir):
+            os.makedirs(output_dir)
+
+        # Process only the first page (page_num = 0)
+        page_num = 0
+        page = doc.load_page(page_num)  # Load the first page
+        pix = page.get_pixmap(dpi=150)  # Render page to an image (dpi=150 for quality)
+        
+        # Define the image path for the first page
+        image_path = os.path.join(output_dir, f"{os.path.splitext(output_file)[0]}_page1.png")
+        pix.save(image_path)  # Save the image
+
+        # Close the document
+        doc.close()
+
+        # Return the single image path as a string (not a list)
+        return image_path
+    except Exception as e:
+        print(f"Error during PDF to image conversion: {e}")
+        return None
+
+@app.route('/fetch-image', methods=['POST'])
+@cross_origin(supports_credentials=True)
+
+def fetch_pdf_image():
+    if 'file' not in request.files:
+        return jsonify({"error": "No file uploaded"}), 400
+
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({"error": "No file selected"}), 400
+
+    if not file.filename.lower().endswith('.pdf'):
+        return jsonify({"error": "Only PDF files are allowed"}), 400
+
+    try:
+        # Save the uploaded file temporarily
+        filename = file.filename
+        pdf_path = os.path.join("temp", filename)
+        file.save(pdf_path)
+
+        # Convert the first page of the PDF to an image
+        output_dir = "output_images"
+        image_paths = convert_pdf_to_image(pdf_path, output_dir)
+
+        if not image_paths:
+            return jsonify({"error": "Failed to convert PDF to image"}), 500
+
+        # Return the first image as a response
+        return send_file(image_paths[0], mimetype='image/png')
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+    finally:
+        # Clean up temporary files
+        if os.path.exists(pdf_path):
+            os.remove(pdf_path)
+
+
+
+    
 if __name__ == '__main__':
     app.run(debug=True)
